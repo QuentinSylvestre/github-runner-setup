@@ -1,13 +1,22 @@
 #!/usr/bin/env bash
 # Setup script for GitHub Actions self-hosted runner on Ubuntu 24.04 LTS.
-# Installs all dependencies required by CI jobs and registers the runner.
+# Installs all dependencies required by CI jobs and registers the runner(s).
 #
 # Usage:
+#   # Single runner (default)
 #   ./scripts/runner/setup-runner.sh \
 #     --repo OWNER/REPO \
 #     --token REGISTRATION_TOKEN \
 #     --labels nuc \
 #     --name my-nuc-runner
+#
+#   # Multiple runners for parallel CI jobs
+#   ./scripts/runner/setup-runner.sh \
+#     --repo OWNER/REPO \
+#     --token REGISTRATION_TOKEN \
+#     --labels nuc \
+#     --name my-nuc \
+#     --count 3
 #
 # Prerequisites:
 #   - Ubuntu 24.04 LTS (fresh install or VM)
@@ -25,12 +34,13 @@ REPO=""
 TOKEN=""
 LABELS=""
 RUNNER_NAME="$(hostname)"
-RUNNER_DIR="/opt/actions-runner"
+RUNNER_BASE_DIR="/opt/actions-runner"
 RUNNER_USER="runner"
+RUNNER_COUNT=1
 
 usage() {
   cat <<EOF
-Usage: $0 --repo OWNER/REPO --token TOKEN [--labels LABEL1,LABEL2] [--name NAME]
+Usage: $0 --repo OWNER/REPO --token TOKEN [--labels LABEL1,LABEL2] [--name NAME] [--count N]
 EOF
 }
 
@@ -69,6 +79,11 @@ while [[ $# -gt 0 ]]; do
       RUNNER_NAME="$2"
       shift 2
       ;;
+    --count)
+      require_argument_value "$1" "${2:-}"
+      RUNNER_COUNT="$2"
+      shift 2
+      ;;
     *)
       die "Unknown option: $1"
       ;;
@@ -95,6 +110,31 @@ fi
 if [[ -n "$LABELS" && ! "$LABELS" =~ ^[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*$ ]]; then
   die "Invalid --labels. Use comma-separated labels with characters: letters, digits, ., _, -"
 fi
+
+if [[ ! "$RUNNER_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+  die "Invalid --count. Must be a positive integer."
+fi
+
+# --- Helper: derive runner name and directory for instance i ---
+# count=1: /opt/actions-runner, original name (backward compatible)
+# count>1: /opt/actions-runner-{i}, {name}-{i}
+instance_name() {
+  local i="$1"
+  if [[ "$RUNNER_COUNT" -eq 1 ]]; then
+    echo "$RUNNER_NAME"
+  else
+    echo "${RUNNER_NAME}-${i}"
+  fi
+}
+
+instance_dir() {
+  local i="$1"
+  if [[ "$RUNNER_COUNT" -eq 1 ]]; then
+    echo "$RUNNER_BASE_DIR"
+  else
+    echo "${RUNNER_BASE_DIR}-${i}"
+  fi
+}
 
 echo "=== Installing system dependencies ==="
 sudo apt-get update
@@ -170,8 +210,8 @@ if ! id "$RUNNER_USER" &>/dev/null; then
 fi
 sudo usermod -aG docker "$RUNNER_USER"
 
-# --- Install GitHub Actions runner ---
-echo "=== Installing GitHub Actions runner ==="
+# --- Download GitHub Actions runner (once) ---
+echo "=== Downloading GitHub Actions runner ==="
 RUNNER_VERSION=$(
   curl -fsSL -H "Accept: application/vnd.github+json" https://api.github.com/repos/actions/runner/releases/latest \
     | jq -r '.tag_name' \
@@ -184,61 +224,81 @@ RUNNER_TARBALL="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
 RUNNER_URL="https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_TARBALL}"
 RUNNER_SHA_FILE="${RUNNER_TARBALL}.sha256"
 RUNNER_SHA_URL="https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_SHA_FILE}"
-RUNNER_LOG_DIR="${RUNNER_DIR}/logs"
 
-sudo install -d -m 0750 -o "$RUNNER_USER" -g "$RUNNER_USER" "$RUNNER_DIR"
-sudo install -d -m 0750 -o "$RUNNER_USER" -g "$RUNNER_USER" "$RUNNER_LOG_DIR"
+# Download and verify once in /tmp
+DOWNLOAD_DIR=$(mktemp -d)
+trap 'rm -rf "$DOWNLOAD_DIR"' EXIT
 
-sudo -u "$RUNNER_USER" env \
-  REPO="$REPO" \
-  TOKEN="$TOKEN" \
-  LABELS="$LABELS" \
-  RUNNER_NAME="$RUNNER_NAME" \
-  RUNNER_DIR="$RUNNER_DIR" \
-  RUNNER_TARBALL="$RUNNER_TARBALL" \
-  RUNNER_URL="$RUNNER_URL" \
-  RUNNER_SHA_FILE="$RUNNER_SHA_FILE" \
-  RUNNER_SHA_URL="$RUNNER_SHA_URL" \
-  bash <<'RUNNER_INSTALL'
-set -euo pipefail
-
-cd "$RUNNER_DIR"
-curl -fsSL -o "$RUNNER_TARBALL" "$RUNNER_URL"
-curl -fsSL -o "$RUNNER_SHA_FILE" "$RUNNER_SHA_URL"
+curl -fsSL -o "${DOWNLOAD_DIR}/${RUNNER_TARBALL}" "$RUNNER_URL"
+curl -fsSL -o "${DOWNLOAD_DIR}/${RUNNER_SHA_FILE}" "$RUNNER_SHA_URL"
 
 # GitHub sometimes publishes checksum files as "<sha>" only. Normalize to
 # "sha  filename" before running sha256sum -c.
-if ! grep -q "$RUNNER_TARBALL" "$RUNNER_SHA_FILE"; then
-  expected_sha="$(awk 'NF {print $1; exit}' "$RUNNER_SHA_FILE")"
+if ! grep -q "$RUNNER_TARBALL" "${DOWNLOAD_DIR}/${RUNNER_SHA_FILE}"; then
+  expected_sha="$(awk 'NF {print $1; exit}' "${DOWNLOAD_DIR}/${RUNNER_SHA_FILE}")"
   if [[ -z "$expected_sha" ]]; then
-    echo "Unable to parse SHA256 from $RUNNER_SHA_FILE" >&2
-    exit 1
+    die "Unable to parse SHA256 from ${RUNNER_SHA_FILE}"
   fi
-  printf '%s  %s\n' "$expected_sha" "$RUNNER_TARBALL" > "$RUNNER_SHA_FILE"
+  printf '%s  %s\n' "$expected_sha" "$RUNNER_TARBALL" > "${DOWNLOAD_DIR}/${RUNNER_SHA_FILE}"
 fi
 
+cd "$DOWNLOAD_DIR"
 sha256sum -c "$RUNNER_SHA_FILE"
-tar xz -f "$RUNNER_TARBALL"
-rm -f "$RUNNER_TARBALL" "$RUNNER_SHA_FILE"
+
+# --- Install runner instance(s) ---
+INSTALLED_SERVICES=()
+
+for i in $(seq 1 "$RUNNER_COUNT"); do
+  INST_NAME=$(instance_name "$i")
+  INST_DIR=$(instance_dir "$i")
+  INST_LOG_DIR="${INST_DIR}/logs"
+
+  if [[ "$RUNNER_COUNT" -gt 1 ]]; then
+    echo ""
+    echo "=== Installing runner ${i}/${RUNNER_COUNT}: ${INST_NAME} ==="
+  else
+    echo ""
+    echo "=== Installing GitHub Actions runner ==="
+  fi
+
+  sudo install -d -m 0750 -o "$RUNNER_USER" -g "$RUNNER_USER" "$INST_DIR"
+  sudo install -d -m 0750 -o "$RUNNER_USER" -g "$RUNNER_USER" "$INST_LOG_DIR"
+
+  # Extract tarball and configure as the runner user
+  sudo -u "$RUNNER_USER" env \
+    REPO="$REPO" \
+    TOKEN="$TOKEN" \
+    LABELS="$LABELS" \
+    INST_NAME="$INST_NAME" \
+    INST_DIR="$INST_DIR" \
+    RUNNER_TARBALL="$RUNNER_TARBALL" \
+    DOWNLOAD_DIR="$DOWNLOAD_DIR" \
+    bash <<'RUNNER_INSTALL'
+set -euo pipefail
+
+cd "$INST_DIR"
+tar xz -f "${DOWNLOAD_DIR}/${RUNNER_TARBALL}"
 
 if [[ -n "$LABELS" ]]; then
-  ./config.sh --url "https://github.com/$REPO" --token "$TOKEN" --name "$RUNNER_NAME" --labels "$LABELS" --unattended --replace
+  ./config.sh --url "https://github.com/$REPO" --token "$TOKEN" --name "$INST_NAME" --labels "$LABELS" --unattended --replace
 else
-  ./config.sh --url "https://github.com/$REPO" --token "$TOKEN" --name "$RUNNER_NAME" --unattended --replace
+  ./config.sh --url "https://github.com/$REPO" --token "$TOKEN" --name "$INST_NAME" --unattended --replace
 fi
 RUNNER_INSTALL
 
-# --- Register as systemd service ---
-echo "=== Registering systemd service ==="
-cd "$RUNNER_DIR"
-sudo ./svc.sh install "$RUNNER_USER"
-sudo ./svc.sh start
+  # Register as systemd service
+  echo "--- Registering systemd service for ${INST_NAME} ---"
+  cd "$INST_DIR"
+  sudo ./svc.sh install "$RUNNER_USER"
+  sudo ./svc.sh start
 
-SERVICE_NAME="actions.runner.${REPO//\//-}.${RUNNER_NAME}.service"
-if sudo systemctl show "$SERVICE_NAME" --property=Id >/dev/null 2>&1; then
-  echo "=== Applying systemd hardening ==="
-  sudo install -d -m 0755 "/etc/systemd/system/${SERVICE_NAME}.d"
-  cat <<EOF | sudo tee "/etc/systemd/system/${SERVICE_NAME}.d/hardening.conf" >/dev/null
+  SERVICE_NAME="actions.runner.${REPO//\//-}.${INST_NAME}.service"
+  INSTALLED_SERVICES+=("$SERVICE_NAME")
+
+  if sudo systemctl show "$SERVICE_NAME" --property=Id >/dev/null 2>&1; then
+    echo "--- Applying systemd hardening for ${INST_NAME} ---"
+    sudo install -d -m 0755 "/etc/systemd/system/${SERVICE_NAME}.d"
+    cat <<EOF | sudo tee "/etc/systemd/system/${SERVICE_NAME}.d/hardening.conf" >/dev/null
 [Service]
 NoNewPrivileges=true
 PrivateTmp=true
@@ -247,33 +307,60 @@ ProtectKernelModules=true
 ProtectKernelTunables=true
 RestrictSUIDSGID=true
 EOF
-  sudo systemctl daemon-reload
-  sudo systemctl restart "$SERVICE_NAME"
-else
-  echo "WARNING: Runner systemd service ${SERVICE_NAME} not found. Skipping hardening drop-in."
-fi
+    sudo systemctl daemon-reload
+    sudo systemctl restart "$SERVICE_NAME"
 
+    # Verify the service stayed active after hardening restart
+    sleep 3
+    if ! systemctl is-active --quiet "$SERVICE_NAME"; then
+      echo "WARNING: ${SERVICE_NAME} failed to stay active after hardening. Removing drop-in and restarting." >&2
+      sudo rm -f "/etc/systemd/system/${SERVICE_NAME}.d/hardening.conf"
+      sudo systemctl daemon-reload
+      sudo systemctl restart "$SERVICE_NAME"
+    fi
+  else
+    echo "WARNING: Runner systemd service ${SERVICE_NAME} not found. Skipping hardening drop-in."
+  fi
+done
+
+# --- Maintenance cron jobs (once per runner user, not per instance) ---
+echo ""
 echo "=== Setting up maintenance cron jobs ==="
-DOCKER_CLEANUP_CRON="0 3 * * 0 docker system prune -af --filter \"until=168h\" >> ${RUNNER_LOG_DIR}/docker-cleanup.log 2>&1 # runner-docker-cleanup"
-WORKSPACE_CLEANUP_CRON="0 4 1 * * find ${RUNNER_DIR}/_work -maxdepth 2 -name \"_temp\" -type d -mtime +30 -exec rm -rf {} + >> ${RUNNER_LOG_DIR}/workspace-cleanup.log 2>&1 # runner-workspace-cleanup"
+# Use the first instance's log dir for cron output
+FIRST_LOG_DIR="$(instance_dir 1)/logs"
+DOCKER_CLEANUP_CRON="0 3 * * 0 docker system prune -af --filter \"until=168h\" >> ${FIRST_LOG_DIR}/docker-cleanup.log 2>&1 # runner-docker-cleanup"
 # Docker cleanup: prune unused images weekly (guard prevents duplicates on re-run)
 if ! sudo -u "$RUNNER_USER" crontab -l 2>/dev/null | grep -q 'runner-docker-cleanup'; then
   sudo -u "$RUNNER_USER" bash -c "(crontab -l 2>/dev/null; echo '${DOCKER_CLEANUP_CRON}') | crontab -"
 fi
+# Build workspace cleanup cron covering all instance _work directories
+WORKSPACE_FIND_PATHS=""
+for i in $(seq 1 "$RUNNER_COUNT"); do
+  WORKSPACE_FIND_PATHS+=" $(instance_dir "$i")/_work"
+done
+WORKSPACE_CLEANUP_CRON="0 4 1 * * find${WORKSPACE_FIND_PATHS} -maxdepth 2 -name \"_temp\" -type d -mtime +30 -exec rm -rf {} + >> ${FIRST_LOG_DIR}/workspace-cleanup.log 2>&1 # runner-workspace-cleanup"
 # Runner workspace cleanup: remove old _work directories monthly
-if ! sudo -u "$RUNNER_USER" crontab -l 2>/dev/null | grep -q 'runner-workspace-cleanup'; then
-  sudo -u "$RUNNER_USER" bash -c "(crontab -l 2>/dev/null; echo '${WORKSPACE_CLEANUP_CRON}') | crontab -"
+# Remove existing entry first (paths may have changed on re-run)
+if sudo -u "$RUNNER_USER" crontab -l 2>/dev/null | grep -q 'runner-workspace-cleanup'; then
+  sudo -u "$RUNNER_USER" bash -c "(crontab -l 2>/dev/null | grep -v 'runner-workspace-cleanup') | crontab -"
 fi
+sudo -u "$RUNNER_USER" bash -c "(crontab -l 2>/dev/null; echo '${WORKSPACE_CLEANUP_CRON}') | crontab -"
 
 echo ""
 echo "=== Setup complete ==="
-if [[ -n "$LABELS" ]]; then
-  echo "Runner '${RUNNER_NAME}' registered for ${REPO} with labels: self-hosted,${LABELS}"
+if [[ "$RUNNER_COUNT" -gt 1 ]]; then
+  echo "${RUNNER_COUNT} runners registered for ${REPO}:"
+  for i in $(seq 1 "$RUNNER_COUNT"); do
+    echo "  - $(instance_name "$i") ($(instance_dir "$i"))"
+  done
 else
-  echo "Runner '${RUNNER_NAME}' registered for ${REPO} with labels: self-hosted"
+  echo "Runner '${RUNNER_NAME}' registered for ${REPO}."
 fi
-echo ""
-echo "Runner logs directory: ${RUNNER_LOG_DIR}"
+if [[ -n "$LABELS" ]]; then
+  echo "Labels: self-hosted,${LABELS}"
+else
+  echo "Labels: self-hosted"
+fi
 echo ""
 echo "Next steps:"
 if [[ -n "$LABELS" ]]; then
@@ -282,5 +369,8 @@ else
   echo "  1. Set the GitHub repo variable RUNNER_LABELS to: [\"self-hosted\"]"
 fi
 echo "     Go to: https://github.com/${REPO}/settings/variables/actions"
-echo "  2. Push a commit or trigger a workflow to verify the runner picks up jobs"
-echo "  3. Monitor: sudo journalctl -u ${SERVICE_NAME} -f"
+echo "  2. Push a commit or trigger a workflow to verify the runner(s) pick up jobs"
+echo "  3. Monitor:"
+for svc in "${INSTALLED_SERVICES[@]}"; do
+  echo "     sudo journalctl -u ${svc} -f"
+done
