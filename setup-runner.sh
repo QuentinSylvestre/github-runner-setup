@@ -212,38 +212,38 @@ sudo usermod -aG docker "$RUNNER_USER"
 
 # --- Download GitHub Actions runner (once) ---
 echo "=== Downloading GitHub Actions runner ==="
-RUNNER_VERSION=$(
-  curl -fsSL -H "Accept: application/vnd.github+json" https://api.github.com/repos/actions/runner/releases/latest \
-    | jq -r '.tag_name' \
-    | sed 's/^v//'
-)
+RELEASE_JSON=$(curl -fsSL -H "Accept: application/vnd.github+json" \
+  https://api.github.com/repos/actions/runner/releases/latest)
+
+RUNNER_VERSION=$(echo "$RELEASE_JSON" | jq -r '.tag_name' | sed 's/^v//')
 if [[ -z "$RUNNER_VERSION" || "$RUNNER_VERSION" == "null" ]]; then
   die "Failed to resolve latest actions/runner version from GitHub API"
 fi
+
 RUNNER_TARBALL="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
-RUNNER_URL="https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_TARBALL}"
-RUNNER_SHA_FILE="${RUNNER_TARBALL}.sha256"
-RUNNER_SHA_URL="https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_SHA_FILE}"
+
+# Extract download URL and SHA256 from the release asset metadata
+RUNNER_URL=$(echo "$RELEASE_JSON" | jq -r --arg name "$RUNNER_TARBALL" \
+  '.assets[] | select(.name == $name) | .browser_download_url')
+RUNNER_SHA=$(echo "$RELEASE_JSON" | jq -r --arg name "$RUNNER_TARBALL" \
+  '.assets[] | select(.name == $name) | .digest' | sed 's/^sha256://')
+
+if [[ -z "$RUNNER_URL" || "$RUNNER_URL" == "null" ]]; then
+  die "Asset ${RUNNER_TARBALL} not found in release v${RUNNER_VERSION}"
+fi
+if [[ -z "$RUNNER_SHA" || "$RUNNER_SHA" == "null" ]]; then
+  die "SHA256 digest not found for ${RUNNER_TARBALL}"
+fi
 
 # Download and verify once in /tmp
 DOWNLOAD_DIR=$(mktemp -d)
 trap 'rm -rf "$DOWNLOAD_DIR"' EXIT
 
+echo "Downloading ${RUNNER_TARBALL} (v${RUNNER_VERSION})..."
 curl -fsSL -o "${DOWNLOAD_DIR}/${RUNNER_TARBALL}" "$RUNNER_URL"
-curl -fsSL -o "${DOWNLOAD_DIR}/${RUNNER_SHA_FILE}" "$RUNNER_SHA_URL"
-
-# GitHub sometimes publishes checksum files as "<sha>" only. Normalize to
-# "sha  filename" before running sha256sum -c.
-if ! grep -q "$RUNNER_TARBALL" "${DOWNLOAD_DIR}/${RUNNER_SHA_FILE}"; then
-  expected_sha="$(awk 'NF {print $1; exit}' "${DOWNLOAD_DIR}/${RUNNER_SHA_FILE}")"
-  if [[ -z "$expected_sha" ]]; then
-    die "Unable to parse SHA256 from ${RUNNER_SHA_FILE}"
-  fi
-  printf '%s  %s\n' "$expected_sha" "$RUNNER_TARBALL" > "${DOWNLOAD_DIR}/${RUNNER_SHA_FILE}"
-fi
 
 cd "$DOWNLOAD_DIR"
-sha256sum -c "$RUNNER_SHA_FILE"
+printf '%s  %s\n' "$RUNNER_SHA" "$RUNNER_TARBALL" | sha256sum -c -
 
 # --- Install runner instance(s) ---
 INSTALLED_SERVICES=()
