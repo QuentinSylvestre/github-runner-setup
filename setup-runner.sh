@@ -245,6 +245,10 @@ curl -fsSL -o "${DOWNLOAD_DIR}/${RUNNER_TARBALL}" "$RUNNER_URL"
 cd "$DOWNLOAD_DIR"
 printf '%s  %s\n' "$RUNNER_SHA" "$RUNNER_TARBALL" | sha256sum -c -
 
+# Make tarball readable by the runner user (mktemp creates 700 dirs)
+chmod o+rx "$DOWNLOAD_DIR"
+chmod o+r "${DOWNLOAD_DIR}/${RUNNER_TARBALL}"
+
 # --- Install runner instance(s) ---
 INSTALLED_SERVICES=()
 
