@@ -136,92 +136,9 @@ instance_dir() {
   fi
 }
 
-echo "=== Installing system dependencies ==="
-sudo apt-get update
-sudo apt-get install -y \
-  curl wget git jq unzip software-properties-common \
-  build-essential libssl-dev libffi-dev \
-  ca-certificates gnupg lsb-release unattended-upgrades
-sudo systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
-
-# --- Python 3.12 ---
-# Ubuntu 24.04 ships Python 3.12 by default; only add deadsnakes if missing
-echo "=== Installing Python 3.12 ==="
-if python3 --version 2>/dev/null | grep -q "3.12"; then
-  echo "Python 3.12 already installed (system default)"
-else
-  sudo add-apt-repository -y ppa:deadsnakes/ppa
-  sudo apt-get update
-  sudo apt-get install -y python3.12 python3.12-venv python3.12-dev
-  sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
-fi
-sudo apt-get install -y python3-pip python3-venv python3-dev
-
-# --- Node.js 22 ---
-echo "=== Installing Node.js 22 ==="
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-# --- Playwright Chromium dependencies ---
-echo "=== Installing Playwright Chromium system dependencies ==="
-sudo apt-get install -y \
-  libasound2t64 \
-  libatk1.0-0t64 \
-  libatk-bridge2.0-0t64 \
-  libatspi2.0-0t64 \
-  libcups2t64 \
-  libdbus-1-3 \
-  libdrm2 \
-  libgbm1 \
-  libgtk-3-0t64 \
-  libnspr4 \
-  libnss3 \
-  libpango-1.0-0 \
-  libxcomposite1 \
-  libxdamage1 \
-  libxfixes3 \
-  libxkbcommon0 \
-  libxrandr2 \
-  libxshmfence1 \
-  fonts-liberation
-
-# --- Java 21 (Temurin, for Firestore emulator) ---
-echo "=== Installing Java 21 (Temurin) ==="
-wget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public | \
-  sudo gpg --dearmor --yes -o /usr/share/keyrings/adoptium.gpg
-echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(lsb_release -cs) main" | \
-  sudo tee /etc/apt/sources.list.d/adoptium.list
-sudo apt-get update
-sudo apt-get install -y temurin-21-jdk
-
-# --- Docker ---
-echo "=== Installing Docker ==="
-sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
-  sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-  https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list
-sudo apt-get update
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
-
-# --- Terraform 1.9.x ---
-echo "=== Installing Terraform ==="
-wget -qO - https://apt.releases.hashicorp.com/gpg | \
-  sudo gpg --dearmor --yes -o /usr/share/keyrings/hashicorp.gpg
-echo "deb [signed-by=/usr/share/keyrings/hashicorp.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | \
-  sudo tee /etc/apt/sources.list.d/hashicorp.list
-sudo apt-get update
-sudo apt-get install -y terraform
-
-# --- Google Cloud SDK (for Firestore emulator) ---
-echo "=== Installing Google Cloud SDK ==="
-curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
-  sudo gpg --dearmor --yes -o /usr/share/keyrings/cloud.google.gpg
-echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
-  sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
-sudo apt-get update
-sudo apt-get install -y google-cloud-sdk google-cloud-cli-firestore-emulator
+# --- Install CI dependencies (shared with update-deps.sh) ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+sudo "$SCRIPT_DIR/update-deps.sh" --no-restart
 
 # --- Create runner user ---
 # Docker is installed before the runner user is created and before the systemd

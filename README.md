@@ -64,6 +64,7 @@ cd github-runner-setup
 | Script | Purpose |
 |---|---|
 | `setup-runner.sh` | Install dependencies, register runner(s), configure systemd |
+| `update-deps.sh` | Update CI dependencies on existing runners (no re-registration) |
 | `restart-runner.sh` | Restart all (or specific) runner services with health check |
 | `uninstall-runner.sh` | Stop, deregister, and clean up all runner instances |
 
@@ -102,6 +103,15 @@ If creating a new VM for the runner:
 ```bash
 sudo systemctl status "actions.runner.*"
 sudo journalctl -u actions.runner.OWNER-REPO.RUNNER_NAME.service -f
+```
+
+### Update dependencies
+```bash
+# Update all CI dependencies and restart runners
+sudo ./update-deps.sh
+
+# Update dependencies without restarting (e.g. during a maintenance window)
+sudo ./update-deps.sh --no-restart
 ```
 
 ### Restart
@@ -173,7 +183,7 @@ du -sh /opt/actions-runner/_work
 |---|---|---|
 | Jobs queue indefinitely | Runner offline or label mismatch | Check service status; verify `RUNNER_LABELS` matches runner labels |
 | Runner shows "Idle" but jobs wait | NAT/firewall dropping long-poll connection | Lower TCP keepalive: `net.ipv4.tcp_keepalive_time=60` in `/etc/sysctl.d/99-runner-keepalive.conf`; run `sysctl --system`; restart runners |
-| Job fails with "tool not found" | Missing dependency on runner | Re-run setup script or install manually |
+| Job fails with "tool not found" | Missing dependency on runner | Run `sudo ./update-deps.sh` or install manually |
 | Docker permission denied | Runner user not in docker group | `sudo usermod -aG docker runner && sudo systemctl restart actions.runner.*` |
 | Disk space exhaustion | Docker images / build artifacts | Run `docker system prune -af`; check cleanup cron is active |
 | Firestore emulator won't start | Java not installed or wrong version | Verify `java -version` shows 21+; re-run setup script |
