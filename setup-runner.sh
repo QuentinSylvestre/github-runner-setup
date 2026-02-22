@@ -162,6 +162,29 @@ echo "=== Installing Node.js 22 ==="
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
+# --- Playwright Chromium dependencies ---
+echo "=== Installing Playwright Chromium system dependencies ==="
+sudo apt-get install -y \
+  libasound2t64 \
+  libatk1.0-0t64 \
+  libatk-bridge2.0-0t64 \
+  libatspi2.0-0t64 \
+  libcups2t64 \
+  libdbus-1-3 \
+  libdrm2 \
+  libgbm1 \
+  libgtk-3-0t64 \
+  libnspr4 \
+  libnss3 \
+  libpango-1.0-0 \
+  libxcomposite1 \
+  libxdamage1 \
+  libxfixes3 \
+  libxkbcommon0 \
+  libxrandr2 \
+  libxshmfence1 \
+  fonts-liberation
+
 # --- Java 21 (Temurin, for Firestore emulator) ---
 echo "=== Installing Java 21 (Temurin) ==="
 wget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public | \
