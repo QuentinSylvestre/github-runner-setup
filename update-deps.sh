@@ -84,7 +84,7 @@ apt-get install -y \
 
 # --- Java 21 (Temurin, for Firestore emulator) ---
 echo "=== Updating Java 21 (Temurin) ==="
-if ! apt-cache policy temurin-21-jdk 2>/dev/null | grep -q "Installed"; then
+if [[ ! -f /etc/apt/sources.list.d/adoptium.list ]]; then
   wget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public | \
     gpg --dearmor --yes -o /usr/share/keyrings/adoptium.gpg
   echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(lsb_release -cs) main" | \
@@ -95,7 +95,7 @@ apt-get install -y temurin-21-jdk
 
 # --- Docker ---
 echo "=== Updating Docker ==="
-if ! apt-cache policy docker-ce 2>/dev/null | grep -q "Installed"; then
+if [[ ! -f /etc/apt/sources.list.d/docker.list ]]; then
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
     gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
@@ -108,7 +108,7 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
 
 # --- Terraform ---
 echo "=== Updating Terraform ==="
-if ! apt-cache policy terraform 2>/dev/null | grep -q "Installed"; then
+if [[ ! -f /etc/apt/sources.list.d/hashicorp.list ]]; then
   wget -qO - https://apt.releases.hashicorp.com/gpg | \
     gpg --dearmor --yes -o /usr/share/keyrings/hashicorp.gpg
   echo "deb [signed-by=/usr/share/keyrings/hashicorp.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | \
@@ -119,7 +119,7 @@ apt-get install -y terraform
 
 # --- Google Cloud SDK ---
 echo "=== Updating Google Cloud SDK ==="
-if ! apt-cache policy google-cloud-sdk 2>/dev/null | grep -q "Installed"; then
+if [[ ! -f /etc/apt/sources.list.d/google-cloud-sdk.list ]]; then
   curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
     gpg --dearmor --yes -o /usr/share/keyrings/cloud.google.gpg
   echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
