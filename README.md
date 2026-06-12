@@ -59,6 +59,39 @@ cd github-runner-setup
 
 5. Push a commit or trigger a workflow to verify.
 
+## How the Runner Runs
+
+`setup-runner.sh` installs the runner as a **systemd service** (via the runner's
+`svc.sh install`) — it does **not** run in your terminal. This matters:
+
+- **Survives logout / terminal close.** The service is owned by systemd, not by
+  your login shell, so closing the SSH session or terminal does not stop it.
+- **Resumes automatically after a reboot.** `svc.sh install` enables the service
+  at boot (the unit is `WantedBy=multi-user.target`), so the machine brings the
+  runner back up on its own — no manual step and no cron `@reboot` entry needed.
+- **Auto-restarts on crash.** systemd restarts the runner if its process exits
+  unexpectedly.
+
+> **Do not start the runner with `./run.sh`.** That runs it in the *foreground*,
+> tied to your shell — it dies the moment you close the terminal (`SIGHUP`) and
+> does **not** come back after a reboot. Always run it as the systemd service.
+
+Verify it's installed correctly and will survive reboots:
+
+```bash
+# Should show "active (running)"
+sudo systemctl status "actions.runner.*"
+
+# Should show "enabled" -- confirms it will auto-start on boot
+sudo systemctl is-enabled "actions.runner.*"
+```
+
+If `is-enabled` reports `disabled`, enable it:
+
+```bash
+sudo systemctl enable "actions.runner.OWNER-REPO.RUNNER_NAME.service"
+```
+
 ## Scripts
 
 | Script | Purpose |
@@ -181,6 +214,8 @@ du -sh /opt/actions-runner/_work
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| Runner stops when I close the terminal | Started in foreground with `./run.sh` | Run it as a service instead: `cd /opt/actions-runner && sudo ./svc.sh install runner && sudo ./svc.sh start` (see [How the Runner Runs](#how-the-runner-runs)) |
+| Runner gone after reboot | Service not enabled at boot | `sudo systemctl is-enabled "actions.runner.*"`; if `disabled`, run `sudo systemctl enable "actions.runner.OWNER-REPO.RUNNER_NAME.service"` |
 | Jobs queue indefinitely | Runner offline or label mismatch | Check service status; verify `RUNNER_LABELS` matches runner labels |
 | Runner shows "Idle" but jobs wait | NAT/firewall dropping long-poll connection | Lower TCP keepalive: `net.ipv4.tcp_keepalive_time=60` in `/etc/sysctl.d/99-runner-keepalive.conf`; run `sysctl --system`; restart runners |
 | Job fails with "tool not found" | Missing dependency on runner | Run `sudo ./update-deps.sh` or install manually |

@@ -230,7 +230,10 @@ else
 fi
 RUNNER_INSTALL
 
-  # Register as systemd service
+  # Register as systemd service. svc.sh install creates the unit, enables it
+  # (so it auto-starts on boot), and svc.sh start launches it now. Running as a
+  # service means the runner is detached from any login shell: it survives
+  # logout/terminal-close and resumes automatically after a reboot.
   echo "--- Registering systemd service for ${INST_NAME} ---"
   cd "$INST_DIR"
   sudo ./svc.sh install "$RUNNER_USER"
@@ -238,6 +241,9 @@ RUNNER_INSTALL
 
   SERVICE_NAME="actions.runner.${REPO//\//-}.${INST_NAME}.service"
   INSTALLED_SERVICES+=("$SERVICE_NAME")
+
+  # Make boot-persistence explicit and idempotent (svc.sh already enables it).
+  sudo systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
 
   if sudo systemctl show "$SERVICE_NAME" --property=Id >/dev/null 2>&1; then
     echo "--- Applying systemd hardening for ${INST_NAME} ---"
@@ -318,3 +324,7 @@ echo "  3. Monitor:"
 for svc in "${INSTALLED_SERVICES[@]}"; do
   echo "     sudo journalctl -u ${svc} -f"
 done
+echo ""
+echo "The runner(s) run as systemd services: they keep running after you log out"
+echo "or close the terminal, and start automatically on reboot. Do NOT start the"
+echo "runner with ./run.sh -- that runs in the foreground and dies when the shell exits."
