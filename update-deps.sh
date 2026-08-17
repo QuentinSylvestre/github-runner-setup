@@ -42,15 +42,15 @@ apt-get install -y \
   ca-certificates gnupg lsb-release unattended-upgrades
 systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
 
-# --- Python 3.12 ---
-echo "=== Updating Python 3.12 ==="
-if python3 --version 2>/dev/null | grep -q "3.12"; then
-  echo "Python 3.12 already installed (system default)"
+# --- Python 3.13 ---
+echo "=== Updating Python 3.13 ==="
+if python3 --version 2>/dev/null | grep -q "3.13"; then
+  echo "Python 3.13 already installed (system default)"
 else
   add-apt-repository -y ppa:deadsnakes/ppa
   apt-get update
-  apt-get install -y python3.12 python3.12-venv python3.12-dev
-  update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
+  apt-get install -y python3.13 python3.13-venv python3.13-dev
+  update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.13 1
 fi
 apt-get install -y python3-pip python3-venv python3-dev
 

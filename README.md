@@ -62,18 +62,18 @@ cd github-runner-setup
 ## How the Runner Runs
 
 `setup-runner.sh` installs the runner as a **systemd service** (via the runner's
-`svc.sh install`) — it does **not** run in your terminal. This matters:
+`svc.sh install`) ΓÇö it does **not** run in your terminal. This matters:
 
 - **Survives logout / terminal close.** The service is owned by systemd, not by
   your login shell, so closing the SSH session or terminal does not stop it.
 - **Resumes automatically after a reboot.** `svc.sh install` enables the service
   at boot (the unit is `WantedBy=multi-user.target`), so the machine brings the
-  runner back up on its own — no manual step and no cron `@reboot` entry needed.
+  runner back up on its own ΓÇö no manual step and no cron `@reboot` entry needed.
 - **Auto-restarts on crash.** systemd restarts the runner if its process exits
   unexpectedly.
 
 > **Do not start the runner with `./run.sh`.** That runs it in the *foreground*,
-> tied to your shell — it dies the moment you close the terminal (`SIGHUP`) and
+> tied to your shell ΓÇö it dies the moment you close the terminal (`SIGHUP`) and
 > does **not** come back after a reboot. Always run it as the systemd service.
 
 Verify it's installed correctly and will survive reboots:
@@ -170,7 +170,7 @@ on the next run.
 
 The setup script installs:
 
-- **Python 3.12** (system default on Ubuntu 24.04, or via deadsnakes PPA)
+- **Python 3.13** (system default on Ubuntu 24.04, or via deadsnakes PPA)
 - **Node.js 22** (via NodeSource)
 - **Java 21** (Eclipse Temurin, for Firestore emulator)
 - **Docker CE** (with buildx plugin)
@@ -227,7 +227,7 @@ du -sh /opt/actions-runner/_work
 ## Network: TCP Keepalive
 
 If the runner VM is behind NAT, the default Linux TCP keepalive (2 hours) is too
-slow — the NAT gateway drops the runner's long-poll connection before a keepalive
+slow ΓÇö the NAT gateway drops the runner's long-poll connection before a keepalive
 probe is sent. Apply this fix:
 
 ```bash
