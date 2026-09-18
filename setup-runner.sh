@@ -207,20 +207,28 @@ for i in $(seq 1 "$RUNNER_COUNT"); do
 
   SERVICE_NAME="actions.runner.${REPO//\//-}.${INST_NAME}.service"
 
-  # Stop and remove any existing local config for this instance before
-  # reconfiguring. config.sh refuses to run over an existing config
-  # ("Cannot configure the runner because it is already configured");
-  # --replace only covers a same-named conflict on GitHub's side, not
-  # local state left behind by a prior setup attempt (e.g. an earlier
-  # single-runner install occupying the base /opt/actions-runner dir that
-  # instance 1 of a --count run also uses). Observed live: re-running
-  # setup-runner.sh on a runner that already had instance 1 configured
-  # aborted here (set -euo pipefail) before instances 2 and 3 were ever
-  # attempted.
-  if sudo systemctl list-unit-files "$SERVICE_NAME" --no-legend 2>/dev/null | grep -q .; then
-    echo "--- Stopping existing service ${SERVICE_NAME} before reconfiguring ---"
-    sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-  fi
+  # Clear any prior state for this instance before (re)configuring.
+  # config.sh refuses to run over an existing config ("Cannot configure the
+  # runner because it is already configured"); --replace only covers a
+  # same-named conflict on GitHub's side, not local state left behind by a
+  # prior setup attempt (e.g. an earlier single-runner install occupying
+  # the base /opt/actions-runner dir that instance 1 of a --count run also
+  # uses). Observed live, two ways:
+  # - Re-running setup-runner.sh on a runner that already had instance 1
+  #   configured aborted here (set -euo pipefail) before instances 2 and 3
+  #   were ever attempted.
+  # - `svc.sh install` (vendored by the runner tarball, not ours to patch)
+  #   refuses to overwrite an existing unit file: "error: exists
+  #   /etc/systemd/system/actions.runner....service" -- from a partial
+  #   attempt that got as far as writing the unit file but aborted before
+  #   `systemctl daemon-reload`/enable, so systemd's own unit-file listing
+  #   doesn't know about it even though the file is sitting on disk.
+  echo "--- Clearing any prior systemd service for ${INST_NAME} ---"
+  sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+  sudo systemctl disable "$SERVICE_NAME" 2>/dev/null || true
+  sudo rm -f "/etc/systemd/system/${SERVICE_NAME}"
+  sudo rm -rf "/etc/systemd/system/${SERVICE_NAME}.d"
+  sudo systemctl daemon-reload
   if [[ -d "$INST_DIR" ]]; then
     echo "--- Wiping existing installation in ${INST_DIR} before reconfiguring ---"
     # A full wipe, not just clearing .runner/.credentials: newer runner
