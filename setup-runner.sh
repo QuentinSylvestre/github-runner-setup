@@ -221,18 +221,19 @@ for i in $(seq 1 "$RUNNER_COUNT"); do
     echo "--- Stopping existing service ${SERVICE_NAME} before reconfiguring ---"
     sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
   fi
-  if [[ -f "${INST_DIR}/.runner" ]]; then
-    echo "--- Clearing existing local runner config in ${INST_DIR} ---"
-    # Deliberately not calling `config.sh remove` here: its `remove`
-    # subcommand doesn't accept --unattended (unlike `config.sh configure`),
-    # and doing it properly needs a separate removal token from GitHub's API
-    # (registration and removal tokens are different endpoints) that this
-    # script never has -- only the registration token passed via --token.
-    # It's also unnecessary: the config.sh call below already passes
-    # --replace, which tells GitHub to replace any same-named runner
-    # server-side. The only real blocker is the local .runner file itself,
-    # which config.sh refuses to configure over; clearing it is sufficient.
-    sudo rm -f "${INST_DIR}/.runner" "${INST_DIR}/.credentials" "${INST_DIR}/.credentials_rsaparams"
+  if [[ -d "$INST_DIR" ]]; then
+    echo "--- Wiping existing installation in ${INST_DIR} before reconfiguring ---"
+    # A full wipe, not just clearing .runner/.credentials: newer runner
+    # versions migrate credentials out of those files into another store
+    # and leave only a marker (.runner_migrated) behind, so config.sh can
+    # still refuse to configure ("already configured") even after those
+    # two files are gone -- observed live, with .runner_migrated the only
+    # config.sh-recognizable file remaining. Chasing specific filenames
+    # across runner-software versions is a losing game; the tar extraction
+    # below fully repopulates this directory regardless, so nothing here
+    # needs to survive a wipe (deliberately not calling `config.sh remove`
+    # first -- see 2d0db41 for why that doesn't work).
+    sudo rm -rf "$INST_DIR"
   fi
 
   sudo install -d -m 0750 -o "$RUNNER_USER" -g "$RUNNER_USER" "$INST_DIR"
