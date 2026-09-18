@@ -205,6 +205,34 @@ for i in $(seq 1 "$RUNNER_COUNT"); do
     echo "=== Installing GitHub Actions runner ==="
   fi
 
+  SERVICE_NAME="actions.runner.${REPO//\//-}.${INST_NAME}.service"
+
+  # Stop and remove any existing local config for this instance before
+  # reconfiguring. config.sh refuses to run over an existing config
+  # ("Cannot configure the runner because it is already configured");
+  # --replace only covers a same-named conflict on GitHub's side, not
+  # local state left behind by a prior setup attempt (e.g. an earlier
+  # single-runner install occupying the base /opt/actions-runner dir that
+  # instance 1 of a --count run also uses). Observed live: re-running
+  # setup-runner.sh on a runner that already had instance 1 configured
+  # aborted here (set -euo pipefail) before instances 2 and 3 were ever
+  # attempted.
+  if sudo systemctl list-unit-files "$SERVICE_NAME" --no-legend 2>/dev/null | grep -q .; then
+    echo "--- Stopping existing service ${SERVICE_NAME} before reconfiguring ---"
+    sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+  fi
+  if [[ -f "${INST_DIR}/.runner" ]]; then
+    echo "--- Removing existing local runner config in ${INST_DIR} ---"
+    if [[ -x "${INST_DIR}/config.sh" ]]; then
+      sudo -u "$RUNNER_USER" "${INST_DIR}/config.sh" remove --unattended --token "$TOKEN" || true
+    fi
+    # Fallback in case removal above failed (e.g. a stale/invalid token --
+    # registration tokens expire after an hour): force-clear the local
+    # config files so the fresh config.sh call below isn't blocked by them.
+    # The subsequent --replace handles reconciling with GitHub's side.
+    sudo rm -f "${INST_DIR}/.runner" "${INST_DIR}/.credentials" "${INST_DIR}/.credentials_rsaparams"
+  fi
+
   sudo install -d -m 0750 -o "$RUNNER_USER" -g "$RUNNER_USER" "$INST_DIR"
   sudo install -d -m 0750 -o "$RUNNER_USER" -g "$RUNNER_USER" "$INST_LOG_DIR"
 
@@ -239,7 +267,6 @@ RUNNER_INSTALL
   sudo ./svc.sh install "$RUNNER_USER"
   sudo ./svc.sh start
 
-  SERVICE_NAME="actions.runner.${REPO//\//-}.${INST_NAME}.service"
   INSTALLED_SERVICES+=("$SERVICE_NAME")
 
   # Make boot-persistence explicit and idempotent (svc.sh already enables it).
