@@ -96,9 +96,22 @@ apt-get install -y \
   libxshmfence1 \
   fonts-liberation
 
+# Each block below guards on BOTH the keyring file and the sources.list.d
+# entry, not the .list file alone. A guard on just the .list file is a false
+# idempotency signal: if `wget | gpg --dearmor` is ever interrupted mid-setup
+# (network blip, Ctrl-C, OOM kill), the .list file can end up written while
+# the keyring it references never gets created, and apt then fails every
+# `apt-get update` afterward with a signature-verification error for that
+# repo -- silently and permanently, because a guard on the .list file alone
+# sees it as "already configured" and never retries. Observed live: exactly
+# this happened to the hashicorp entry on a runner, and every subsequent
+# `apt-get update` (including this script's own first one, above) kept
+# failing until fixed by hand. Checking both files makes the block
+# self-healing on the next run instead of requiring manual intervention.
+
 # --- Java 21 (Temurin, for Firestore emulator) ---
 echo "=== Updating Java 21 (Temurin) ==="
-if [[ ! -f /etc/apt/sources.list.d/adoptium.list ]]; then
+if [[ ! -f /usr/share/keyrings/adoptium.gpg || ! -f /etc/apt/sources.list.d/adoptium.list ]]; then
   wget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public | \
     gpg --dearmor --yes -o /usr/share/keyrings/adoptium.gpg
   echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(lsb_release -cs) main" | \
@@ -109,7 +122,7 @@ apt-get install -y temurin-21-jdk
 
 # --- Docker ---
 echo "=== Updating Docker ==="
-if [[ ! -f /etc/apt/sources.list.d/docker.list ]]; then
+if [[ ! -f /etc/apt/keyrings/docker.gpg || ! -f /etc/apt/sources.list.d/docker.list ]]; then
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
     gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
@@ -122,7 +135,7 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
 
 # --- Terraform ---
 echo "=== Updating Terraform ==="
-if [[ ! -f /etc/apt/sources.list.d/hashicorp.list ]]; then
+if [[ ! -f /usr/share/keyrings/hashicorp.gpg || ! -f /etc/apt/sources.list.d/hashicorp.list ]]; then
   wget -qO - https://apt.releases.hashicorp.com/gpg | \
     gpg --dearmor --yes -o /usr/share/keyrings/hashicorp.gpg
   echo "deb [signed-by=/usr/share/keyrings/hashicorp.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | \
@@ -133,7 +146,7 @@ apt-get install -y terraform
 
 # --- Google Cloud SDK ---
 echo "=== Updating Google Cloud SDK ==="
-if [[ ! -f /etc/apt/sources.list.d/google-cloud-sdk.list ]]; then
+if [[ ! -f /usr/share/keyrings/cloud.google.gpg || ! -f /etc/apt/sources.list.d/google-cloud-sdk.list ]]; then
   curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
     gpg --dearmor --yes -o /usr/share/keyrings/cloud.google.gpg
   echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
