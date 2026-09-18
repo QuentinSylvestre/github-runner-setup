@@ -43,14 +43,28 @@ apt-get install -y \
 systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
 
 # --- Python 3.13 ---
-echo "=== Updating Python 3.13 ==="
-if python3 --version 2>/dev/null | grep -q "3.13"; then
-  echo "Python 3.13 already installed (system default)"
-else
+# Installed alongside the OS's own python3, never made the system default.
+# update-alternatives --install /usr/bin/python3 ... used to repoint the
+# system python3 at 3.13, which broke apt's own tooling: apt_pkg (needed by
+# command-not-found's cnf-update-db hook, invoked on every `apt-get update`)
+# is a compiled extension tied to the specific python3 build Ubuntu ships
+# (3.12 on noble), not whatever python3 happens to point to. Once redirected,
+# every subsequent apt-get update failed with
+# "ModuleNotFoundError: No module named 'apt_pkg'" and a nonzero exit code,
+# which aborted this script (set -euo pipefail) on every future run.
+#
+# CI doesn't need python3.13 to be the system default anyway: every workflow
+# job provisions its own Python 3.13 via actions/setup-python, which
+# prepends its managed install to PATH regardless of the system default.
+# scripts/dev/setup_test_calendar.py-style callers that need 3.13
+# specifically should invoke `python3.13` directly.
+echo "=== Installing Python 3.13 ==="
+if ! python3.13 --version >/dev/null 2>&1; then
   add-apt-repository -y ppa:deadsnakes/ppa
   apt-get update
   apt-get install -y python3.13 python3.13-venv python3.13-dev
-  update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.13 1
+else
+  echo "Python 3.13 already installed"
 fi
 apt-get install -y python3-pip python3-venv python3-dev
 
