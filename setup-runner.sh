@@ -222,14 +222,16 @@ for i in $(seq 1 "$RUNNER_COUNT"); do
     sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
   fi
   if [[ -f "${INST_DIR}/.runner" ]]; then
-    echo "--- Removing existing local runner config in ${INST_DIR} ---"
-    if [[ -x "${INST_DIR}/config.sh" ]]; then
-      sudo -u "$RUNNER_USER" "${INST_DIR}/config.sh" remove --unattended --token "$TOKEN" || true
-    fi
-    # Fallback in case removal above failed (e.g. a stale/invalid token --
-    # registration tokens expire after an hour): force-clear the local
-    # config files so the fresh config.sh call below isn't blocked by them.
-    # The subsequent --replace handles reconciling with GitHub's side.
+    echo "--- Clearing existing local runner config in ${INST_DIR} ---"
+    # Deliberately not calling `config.sh remove` here: its `remove`
+    # subcommand doesn't accept --unattended (unlike `config.sh configure`),
+    # and doing it properly needs a separate removal token from GitHub's API
+    # (registration and removal tokens are different endpoints) that this
+    # script never has -- only the registration token passed via --token.
+    # It's also unnecessary: the config.sh call below already passes
+    # --replace, which tells GitHub to replace any same-named runner
+    # server-side. The only real blocker is the local .runner file itself,
+    # which config.sh refuses to configure over; clearing it is sufficient.
     sudo rm -f "${INST_DIR}/.runner" "${INST_DIR}/.credentials" "${INST_DIR}/.credentials_rsaparams"
   fi
 
